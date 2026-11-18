@@ -1,9 +1,10 @@
 import csv
 import math
 import os
+from datetime import date
 
 ARCHIVO = "gastos.csv"
-CAMPOS = ["descripcion", "cantidad", "categoria"]
+CAMPOS = ["descripcion", "cantidad", "categoria", "fecha"]
 
 if not os.path.exists(ARCHIVO):
     with open(ARCHIVO, "w", newline="", encoding="utf-8") as f:
@@ -14,10 +15,19 @@ gastos = []
 
 with open(ARCHIVO, "r", encoding="utf-8") as f:
     reader = csv.DictReader(f)
+    cabecera_vieja = reader.fieldnames != CAMPOS
     for fila in reader:
         fila["cantidad"] = float(fila["cantidad"])
         fila["categoria"] = fila["categoria"].strip().lower()
+        fila["fecha"] = fila.get("fecha") or "sin fecha"
         gastos.append(fila)
+
+# Si el CSV tenía la cabecera antigua (sin fecha), lo reescribimos con la nueva
+if cabecera_vieja:
+    with open(ARCHIVO, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CAMPOS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(gastos)
 
 while True:
     print("\n--- GESTOR DE GASTOS ---")
@@ -41,7 +51,8 @@ while True:
             except ValueError:
                 print("Eso no es un número, prueba otra vez.")
         categoria = input("¿Categoría? (comida, ocio, transporte...) ").strip().lower()
-        gasto = {"descripcion": descripcion, "cantidad": cantidad, "categoria": categoria}
+        fecha = date.today().isoformat()
+        gasto = {"descripcion": descripcion, "cantidad": cantidad, "categoria": categoria, "fecha": fecha}
         gastos.append(gasto)
         with open(ARCHIVO, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=CAMPOS)
@@ -55,7 +66,7 @@ while True:
             print("Lista de gastos:")
             numero = 1
             for gasto in gastos:
-                print(f"{numero}. {gasto['descripcion']} - {gasto['cantidad']:.2f} € ({gasto['categoria']})")
+                print(f"{numero}. [{gasto['fecha']}] {gasto['descripcion']} - {gasto['cantidad']:.2f} € ({gasto['categoria']})")
                 numero += 1
 
     elif opcion == "3":
