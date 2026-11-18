@@ -4,11 +4,30 @@ import os
 import shutil
 from datetime import date, datetime
 
-ARCHIVO = "gastos.csv"
+# matplotlib es opcional: si no está instalado, el resto del programa funciona igual
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
+
+# ---------------------------------------------------------------------------
+# Configuración
+# ---------------------------------------------------------------------------
+
+# Todo se guarda junto a main.py, se ejecute desde la carpeta que se ejecute
+CARPETA = os.path.dirname(os.path.abspath(__file__))
+NOMBRE_ARCHIVO = "gastos.csv"
+ARCHIVO = os.path.join(CARPETA, NOMBRE_ARCHIVO)
 CAMPOS = ["descripcion", "cantidad", "categoria", "fecha"]
+
 DESCRIPCION_POR_DEFECTO = "sin descripción"
 CATEGORIA_POR_DEFECTO = "otros"
 SIN_FECHA = "sin fecha"
+SIN_GASTOS = "No hay gastos todavía."
+CANTIDAD_GRANDE = 10_000  # a partir de aquí se pide confirmación
+
+# Gráficos
+UMBRAL_OTROS = 0.05  # en la tarta, las categorías por debajo del 5 % van a "otros"
 
 
 # ---------------------------------------------------------------------------
@@ -16,25 +35,31 @@ SIN_FECHA = "sin fecha"
 # ---------------------------------------------------------------------------
 
 def guardar_todos(gastos):
-    """Reescribe el CSV entero con la lista actual de gastos."""
-    with open(ARCHIVO, "w", newline="", encoding="utf-8") as f:
+    """Reescribe el CSV entero con la lista actual de gastos.
+    Escribe primero en un archivo temporal y luego lo cambia por el bueno,
+    así si el programa se corta a mitad el CSV original queda intacto."""
+    temporal = ARCHIVO + ".tmp"
+    with open(temporal, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CAMPOS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(gastos)
-
-
-def guardar_gasto(gasto):
-    """Añade un solo gasto al final del CSV."""
-    with open(ARCHIVO, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CAMPOS)
-        writer.writerow(gasto)
+    os.replace(temporal, ARCHIVO)
 
 
 def hacer_copia_seguridad():
     """Copia el CSV actual a un archivo con fecha y hora y devuelve su nombre."""
     nombre = f"gastos_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    shutil.copy(ARCHIVO, nombre)
+    shutil.copy(ARCHIVO, os.path.join(CARPETA, nombre))
     return nombre
+
+
+def a_numero(texto):
+    """Convierte "12.5", "12,5" o "1.234,56" en float. Lanza ValueError si no es un número."""
+    texto = texto.strip()
+    if "," in texto:
+        # Formato español: el punto separa miles y la coma los decimales
+        texto = texto.replace(".", "").replace(",", ".")
+    return float(texto)
 
 
 def limpiar_fila(fila):
@@ -43,7 +68,7 @@ def limpiar_fila(fila):
     def texto(campo):
         return (fila.get(campo) or "").strip()
 
-    cantidad = float(texto("cantidad").replace(",", "."))  # ValueError si no es número
+    cantidad = round(a_numero(texto("cantidad")), 2)  # ValueError si no es número
     if not math.isfinite(cantidad) or cantidad <= 0:
         raise ValueError("cantidad no válida")
 
@@ -80,7 +105,10 @@ def cargar_gastos():
     try:
         # "utf-8-sig" quita el BOM que añade Excel al principio del archivo
         with open(ARCHIVO, "r", newline="", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
+            # Excel en español separa las columnas con ";" en vez de ","
+            separador = ";" if ";" in f.readline() else ","
+            f.seek(0)
+            reader = csv.DictReader(f, delimiter=separador)
             cabecera_vieja = reader.fieldnames != CAMPOS
             for fila in reader:
                 try:
@@ -92,22 +120,25 @@ def cargar_gastos():
                     descartadas.append(reader.line_num)
     except (UnicodeDecodeError, csv.Error) as error:
         copia = hacer_copia_seguridad()
-        print(f"\n⚠️  No se ha podido leer {ARCHIVO} ({error}).")
+        print(f"\n⚠️  No se ha podido leer {NOMBRE_ARCHIVO} ({error}).")
         print(f"   Se ha guardado una copia en {copia} y se empieza con la lista vacía.")
         guardar_todos([])
         return []
 
     if descartadas or reparadas:
         copia = hacer_copia_seguridad()
-        print(f"\n⚠️  {ARCHIVO} tenía filas con problemas. Copia del original en {copia}.")
+        print(f"\n⚠️  {NOMBRE_ARCHIVO} tenía filas con problemas. Copia del original en {copia}.")
         if descartadas:
             print(f"   Filas descartadas (cantidad no válida): líneas {', '.join(map(str, descartadas))}")
         if reparadas:
             print(f"   Fechas no válidas cambiadas a '{SIN_FECHA}': líneas {', '.join(map(str, reparadas))}")
         guardar_todos(gastos)
-    elif cabecera_vieja:
-        # El CSV tenía la cabecera antigua (sin fecha): lo reescribimos con la nueva
+    elif cabecera_vieja or separador != ",":
+        # Cabecera antigua (sin fecha) o separado por ";": lo pasamos al formato normal
         guardar_todos(gastos)
+
+    if separador != ",":
+        print(f"\nℹ️  {NOMBRE_ARCHIVO} estaba separado por ';' (Excel). Se ha convertido a comas.")
 
     return gastos
 
@@ -117,21 +148,27 @@ def cargar_gastos():
 # ---------------------------------------------------------------------------
 
 def pedir_cantidad(mensaje, permitir_vacio=False):
-    """Pide una cantidad válida (> 0). Si permitir_vacio, Enter devuelve None."""
+    """Pide una cantidad válida (> 0, con 2 decimales). Si permitir_vacio, Enter devuelve None."""
     while True:
-        texto = input(mensaje).strip().replace(",", ".")
+        texto = input(mensaje).strip()
         if permitir_vacio and texto == "":
             return None
         try:
-            cantidad = float(texto)
-            if not math.isfinite(cantidad):
-                print("Eso no es un número válido, prueba otra vez.")
-            elif cantidad <= 0:
-                print("La cantidad tiene que ser mayor que 0.")
-            else:
-                return cantidad
+            cantidad = round(a_numero(texto), 2)
         except ValueError:
             print("Eso no es un número, prueba otra vez.")
+            continue
+
+        if not math.isfinite(cantidad):
+            print("Eso no es un número válido, prueba otra vez.")
+        elif cantidad <= 0:
+            print("La cantidad tiene que ser mayor que 0 (con 2 decimales como mucho).")
+        elif cantidad >= CANTIDAD_GRANDE:
+            confirmar = input(f"¿Seguro que son {cantidad:.2f} €? (s/n): ").strip().lower()
+            if confirmar == "s":
+                return cantidad
+        else:
+            return cantidad
 
 
 def pedir_fecha(mensaje):
@@ -148,28 +185,25 @@ def pedir_fecha(mensaje):
 
 def elegir_de_lista(cantidad_opciones, mensaje):
     """Pide un número entre 1 y cantidad_opciones.
-    Si es válido devuelve el índice (int, desde 0); si no, el texto escrito (str)."""
+    Devuelve el índice (desde 0), o None si se cancela o no es válido (ya avisa él)."""
     elegido = input(mensaje).strip()
     # isdecimal() y no isdigit(): "²".isdigit() es True pero int("²") falla
     if elegido.isdecimal() and 1 <= int(elegido) <= cantidad_opciones:
         return int(elegido) - 1
-    return elegido  # devolvemos el texto para poder mostrarlo en el aviso
+    if elegido == "":
+        print("Cancelado.")
+    else:
+        print(f"⚠️  '{elegido}' no es un número válido.")
+    return None
 
 
 def elegir_gasto(gastos, accion):
     """Muestra la lista y devuelve el índice del gasto elegido, o None."""
     if len(gastos) == 0:
-        print("No hay gastos todavía.")
+        print(SIN_GASTOS)
         return None
     mostrar_lista(gastos)
-    elegido = elegir_de_lista(len(gastos), f"Número del gasto a {accion} (Enter para cancelar): ")
-    if isinstance(elegido, int):
-        return elegido
-    if elegido == "":
-        print("Cancelado.")
-    else:
-        print(f"⚠️  '{elegido}' no es un número de gasto válido.")
-    return None
+    return elegir_de_lista(len(gastos), f"Número del gasto a {accion} (Enter para cancelar): ")
 
 
 # ---------------------------------------------------------------------------
@@ -186,12 +220,12 @@ def mostrar_lista(gastos):
 
 
 def totales_por_categoria(gastos):
-    """Devuelve un diccionario {categoria: total}."""
+    """Devuelve un diccionario {categoria: total} ordenado de mayor a menor."""
     totales = {}
     for gasto in gastos:
         cat = gasto["categoria"]
         totales[cat] = totales.get(cat, 0) + gasto["cantidad"]
-    return totales
+    return dict(sorted(totales.items(), key=lambda par: par[1], reverse=True))
 
 
 def agrupar_por_mes(gastos):
@@ -240,20 +274,23 @@ def anadir_gasto(gastos):
     descripcion = input("¿En qué has gastado? ").strip() or DESCRIPCION_POR_DEFECTO
     cantidad = pedir_cantidad("¿Cuánto? ")
     categoria = input(f"¿Categoría? (comida, ocio, transporte...) [Enter = {CATEGORIA_POR_DEFECTO}] ").strip().lower() or CATEGORIA_POR_DEFECTO
+    fecha = pedir_fecha("¿Fecha? AAAA-MM-DD [Enter = hoy] ") or date.today().isoformat()
     gasto = {
         "descripcion": descripcion,
         "cantidad": cantidad,
         "categoria": categoria,
-        "fecha": date.today().isoformat(),
+        "fecha": fecha,
     }
     gastos.append(gasto)
-    guardar_gasto(gasto)
-    print(f"Gasto guardado: {descripcion} - {cantidad:.2f} € ({categoria})")
+    # Se reescribe el archivo entero: así nunca se pega a una última línea sin salto
+    # ni se queda sin cabecera si alguien ha borrado el CSV con el programa abierto
+    guardar_todos(gastos)
+    print(f"Gasto guardado: {formatear_gasto(gasto)}")
 
 
 def ver_lista(gastos):
     if len(gastos) == 0:
-        print("No hay gastos todavía.")
+        print(SIN_GASTOS)
     else:
         print("Lista de gastos:")
         mostrar_lista(gastos)
@@ -262,17 +299,19 @@ def ver_lista(gastos):
 def ver_total_por_categoria(gastos):
     totales = totales_por_categoria(gastos)
     if len(totales) == 0:
-        print("No hay gastos todavía.")
-    else:
-        print("Total por categoría:")
-        for cat, total in totales.items():
-            print(f"{cat}: {total:.2f} €")
+        print(SIN_GASTOS)
+        return
+    total_general = sum(totales.values())
+    print("Total por categoría:")
+    for cat, total in totales.items():
+        print(f"{cat}: {total:.2f} € ({total / total_general:.0%})")
+    print(f"TOTAL: {total_general:.2f} €")
 
 
 def ver_por_mes(gastos):
     por_mes = agrupar_por_mes(gastos)
     if len(por_mes) == 0:
-        print("No hay gastos todavía.")
+        print(SIN_GASTOS)
         return
 
     meses = ordenar_meses(por_mes)
@@ -293,12 +332,8 @@ def ver_por_mes(gastos):
         print("Meses con gastos:")
         for i, m in enumerate(meses, start=1):
             print(f"{i}. {m}")
-        elegido = elegir_de_lista(len(meses), "Elige el número del mes: ")
-        if isinstance(elegido, int):
-            meses_a_ver = [meses[elegido]]
-        else:
-            print(f"⚠️  '{elegido}' no es un mes válido.")
-            meses_a_ver = []
+        elegido = elegir_de_lista(len(meses), "Elige el número del mes (Enter para cancelar): ")
+        meses_a_ver = [] if elegido is None else [meses[elegido]]
     elif eleccion == "4":
         meses_a_ver = meses
     else:
@@ -354,6 +389,112 @@ def borrar_gasto(gastos):
 
 
 # ---------------------------------------------------------------------------
+# Gráficos (necesitan matplotlib)
+# ---------------------------------------------------------------------------
+
+def matplotlib_disponible():
+    if plt is None:
+        print("\n⚠️  Para ver gráficos hace falta instalar matplotlib.")
+        print("   Instálalo con:  pip install matplotlib")
+        print("   y vuelve a abrir el programa.")
+        return False
+    return True
+
+
+def agrupar_pequenas(totales, umbral=UMBRAL_OTROS):
+    """Junta en "otros" las categorías que no llegan al umbral del total.
+    Devuelve un diccionario nuevo ordenado de mayor a menor."""
+    total = sum(totales.values())
+    agrupado = {}
+    for cat, cantidad in totales.items():
+        destino = cat if cantidad / total >= umbral else CATEGORIA_POR_DEFECTO
+        agrupado[destino] = agrupado.get(destino, 0) + cantidad
+    if len(agrupado) == 1 and len(totales) > 1:
+        # Todas eran pequeñas: agruparlas daría una tarta de un solo color
+        agrupado = totales
+    return dict(sorted(agrupado.items(), key=lambda par: par[1], reverse=True))
+
+
+def totales_por_mes(gastos):
+    """Devuelve ({"AAAA-MM": total} en orden cronológico, nº de gastos sin fecha)."""
+    por_mes = agrupar_por_mes(gastos)
+    sin_fecha = len(por_mes.pop(SIN_FECHA, []))
+    totales = {mes: sum(g["cantidad"] for g in por_mes[mes]) for mes in sorted(por_mes)}
+    return totales, sin_fecha
+
+
+def mostrar_o_guardar(fig, nombre_base):
+    """Pregunta si mostrar el gráfico, guardarlo como PNG o las dos cosas."""
+    print("\n¿Qué quieres hacer con el gráfico?")
+    print("1. Mostrarlo")
+    print("2. Guardarlo como PNG")
+    print("3. Guardarlo y mostrarlo")
+    eleccion = input("Elige una opción [Enter = 1]: ").strip() or "1"
+
+    if eleccion not in ("1", "2", "3"):
+        print(f"⚠️  '{eleccion}' no es una opción válida.")
+        plt.close(fig)
+        return
+
+    if eleccion in ("2", "3"):
+        archivo = f"{nombre_base}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        fig.savefig(os.path.join(CARPETA, archivo), dpi=150, bbox_inches="tight")
+        print(f"Gráfico guardado en {archivo}")
+
+    if eleccion in ("1", "3"):
+        print("ℹ️  Se va a abrir el gráfico. Cierra la ventana para volver al menú.")
+        plt.show()  # se queda esperando hasta que se cierra la ventana
+    plt.close(fig)
+
+
+def grafico_categorias(gastos):
+    if not matplotlib_disponible():
+        return
+    if len(gastos) == 0:
+        print(SIN_GASTOS)
+        return
+
+    totales = agrupar_pequenas(totales_por_categoria(gastos))
+    total = sum(totales.values())
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    ax.pie(totales.values(), labels=totales.keys(), autopct="%1.1f%%", startangle=90, counterclock=False)
+    ax.set_title(f"Gastos por categoría (total: {total:.2f} €)", pad=25)
+    ax.axis("equal")  # para que la tarta sea redonda
+    mostrar_o_guardar(fig, "grafico_categorias")
+
+
+def grafico_meses(gastos):
+    if not matplotlib_disponible():
+        return
+    if len(gastos) == 0:
+        print(SIN_GASTOS)
+        return
+
+    totales, sin_fecha = totales_por_mes(gastos)
+    if sin_fecha:
+        print(f"⚠️  {sin_fecha} gasto(s) '{SIN_FECHA}' se han quedado fuera del gráfico.")
+    if len(totales) == 0:
+        print("Ningún gasto tiene fecha, no se puede hacer el gráfico por mes.")
+        return
+
+    meses = list(totales.keys())
+    cantidades = list(totales.values())
+
+    fig, ax = plt.subplots(figsize=(max(6, len(meses) * 1.2), 5))
+    barras = ax.bar(meses, cantidades)
+    ax.bar_label(barras, labels=[f"{c:.2f} €" for c in cantidades], padding=3)
+    ax.set_title("Gastos por mes")
+    ax.set_xlabel("Mes")
+    ax.set_ylabel("Euros")
+    ax.margins(y=0.15)  # deja hueco arriba para las etiquetas
+    if len(meses) > 6:
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    fig.tight_layout()
+    mostrar_o_guardar(fig, "grafico_meses")
+
+
+# ---------------------------------------------------------------------------
 # Menú principal
 # ---------------------------------------------------------------------------
 
@@ -363,8 +504,10 @@ OPCIONES = [
     ("2", "Ver lista de gastos", ver_lista),
     ("3", "Ver total por categoría", ver_total_por_categoria),
     ("4", "Ver gastos por mes", ver_por_mes),
-    ("5", "Editar un gasto", editar_gasto),
-    ("6", "Borrar un gasto", borrar_gasto),
+    ("5", "Gráfico de tarta por categorías", grafico_categorias),
+    ("6", "Gráfico de barras por mes", grafico_meses),
+    ("7", "Editar un gasto", editar_gasto),
+    ("8", "Borrar un gasto", borrar_gasto),
 ]
 OPCION_SALIR = str(len(OPCIONES) + 1)
 
@@ -394,4 +537,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, EOFError):
+        # Ctrl+C o Ctrl+D/Ctrl+Z: salir sin traceback (lo ya guardado no se pierde)
+        print("\nSaliendo del gestor de gastos...")

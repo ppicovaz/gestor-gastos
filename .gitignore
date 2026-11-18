@@ -1,2 +1,5 @@
 gastos.csv
 gastos_backup_*.csv
+grafico_*.png
+*.tmp
+__pycache__/
