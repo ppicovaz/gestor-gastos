@@ -1,6 +1,14 @@
 import csv
+import math
+import os
 
 ARCHIVO = "gastos.csv"
+CAMPOS = ["descripcion", "cantidad", "categoria"]
+
+if not os.path.exists(ARCHIVO):
+    with open(ARCHIVO, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CAMPOS)
+        writer.writeheader()
 
 gastos = []
 
@@ -8,6 +16,7 @@ with open(ARCHIVO, "r", encoding="utf-8") as f:
     reader = csv.DictReader(f)
     for fila in reader:
         fila["cantidad"] = float(fila["cantidad"])
+        fila["categoria"] = fila["categoria"].strip().lower()
         gastos.append(fila)
 
 while True:
@@ -16,21 +25,26 @@ while True:
     print("2. Ver lista de gastos")
     print("3. Ver total por categoría")
     print("4. Salir")
-    opcion = input("Elige una opción: ")
+    opcion = input("Elige una opción: ").strip()
 
     if opcion == "1":
         descripcion = input("¿En qué has gastado? ").strip()
         while True:
             try:
-                cantidad = float(input("¿Cuánto? "))
-                break
+                cantidad = float(input("¿Cuánto? ").strip().replace(",", "."))
+                if not math.isfinite(cantidad):
+                    print("Eso no es un número válido, prueba otra vez.")
+                elif cantidad <= 0:
+                    print("La cantidad tiene que ser mayor que 0.")
+                else:
+                    break
             except ValueError:
                 print("Eso no es un número, prueba otra vez.")
         categoria = input("¿Categoría? (comida, ocio, transporte...) ").strip().lower()
         gasto = {"descripcion": descripcion, "cantidad": cantidad, "categoria": categoria}
         gastos.append(gasto)
         with open(ARCHIVO, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["descripcion", "cantidad", "categoria"])
+            writer = csv.DictWriter(f, fieldnames=CAMPOS)
             writer.writerow(gasto)
         print(f"Gasto guardado: {descripcion} - {cantidad:.2f} € ({categoria})")
 
@@ -41,7 +55,7 @@ while True:
             print("Lista de gastos:")
             numero = 1
             for gasto in gastos:
-                print(f"{numero}. {gasto['descripcion']} - {gasto['cantidad']} € ({gasto['categoria']})")
+                print(f"{numero}. {gasto['descripcion']} - {gasto['cantidad']:.2f} € ({gasto['categoria']})")
                 numero += 1
 
     elif opcion == "3":
@@ -65,4 +79,4 @@ while True:
         break
 
     else:
-        print("Opción no válida, prueba otra vez.")
+        print(f"\n⚠️  '{opcion}' no es una opción válida. Elige un número del 1 al 4.")
