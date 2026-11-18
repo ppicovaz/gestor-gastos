@@ -7,6 +7,8 @@ Programa en Python para apuntar mis gastos del día a día y ver en qué gasto m
 - Añadir gastos con descripción, cantidad y categoría
 - Ver la lista de todos los gastos
 - Ver el total gastado por categoría
+- Ver los gastos agrupados por mes, con el total de cada mes
+- Editar y borrar gastos
 - Los gastos se guardan en un archivo CSV para no perderlos al cerrar
 
 ## Cómo usarlo
@@ -26,7 +28,7 @@ python main.py
 ## Próximas mejoras
 
 - [ ] Gráficas de gastos por categoría
-- [ ] Filtrar gastos por mes
+- [x] Ver gastos por mes
 - [ ] Interfaz web con Streamlit
 - [ ] Categorización automática con IA
 
