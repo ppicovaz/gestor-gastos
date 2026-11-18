@@ -13,11 +13,7 @@ Programa en Python para apuntar mis gastos del día a día y ver en qué gasto m
 
 1. Tener Python 3 instalado
 2. Descargar el proyecto
-3. Crear un archivo `gastos.csv` con esta primera línea:
-```
-descripcion,cantidad,categoria
-```
-4. Ejecutar:
+3. Ejecutar:
 ```
 python main.py
 ```
