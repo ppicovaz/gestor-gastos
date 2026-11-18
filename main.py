@@ -19,19 +19,20 @@ while True:
     opcion = input("Elige una opción: ")
 
     if opcion == "1":
-        descripcion = input("¿En qué has gastado? ")
-        try:
-            cantidad = float(input("¿Cuánto? "))
-        except ValueError:
-            print("Eso no es un número, prueba otra vez.")
-            continue
+        descripcion = input("¿En qué has gastado? ").strip()
+        while True:
+            try:
+                cantidad = float(input("¿Cuánto? "))
+                break
+            except ValueError:
+                print("Eso no es un número, prueba otra vez.")
         categoria = input("¿Categoría? (comida, ocio, transporte...) ").strip().lower()
         gasto = {"descripcion": descripcion, "cantidad": cantidad, "categoria": categoria}
         gastos.append(gasto)
         with open(ARCHIVO, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=["descripcion", "cantidad", "categoria"])
             writer.writerow(gasto)
-        print(f"Gasto guardado: {descripcion} - {cantidad} € ({categoria})")
+        print(f"Gasto guardado: {descripcion} - {cantidad:.2f} € ({categoria})")
 
     elif opcion == "2":
         if len(gastos) == 0:
