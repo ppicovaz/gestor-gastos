@@ -1,6 +1,7 @@
 import csv
 import math
 import os
+import re
 import shutil
 from datetime import date, datetime
 
@@ -39,7 +40,9 @@ def guardar_todos(gastos):
     Escribe primero en un archivo temporal y luego lo cambia por el bueno,
     así si el programa se corta a mitad el CSV original queda intacto."""
     temporal = ARCHIVO + ".tmp"
-    with open(temporal, "w", newline="", encoding="utf-8") as f:
+    # "utf-8-sig" añade al principio una marca (BOM) que le dice a Excel que es UTF-8;
+    # sin ella Excel enseña las tildes mal ("descripciÃ³n")
+    with open(temporal, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=CAMPOS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(gastos)
@@ -54,12 +57,25 @@ def hacer_copia_seguridad():
 
 
 def a_numero(texto):
-    """Convierte "12.5", "12,5" o "1.234,56" en float. Lanza ValueError si no es un número."""
+    """Convierte "12.5", "12,5", "1.500" o "1.234,56" en float. Lanza ValueError si no es un número."""
     texto = texto.strip()
     if "," in texto:
         # Formato español: el punto separa miles y la coma los decimales
         texto = texto.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", texto):
+        # "1.500" o "12.000": puntos de miles. No pueden ser decimales porque
+        # en euros nunca hay 3 decimales
+        texto = texto.replace(".", "")
     return float(texto)
+
+
+def a_fecha(texto):
+    """Convierte "2026-11-18" o "18/11/2026" (como la guarda Excel) en "2026-11-18".
+    Lanza ValueError si no es una fecha válida."""
+    try:
+        return date.fromisoformat(texto).isoformat()
+    except ValueError:
+        return datetime.strptime(texto, "%d/%m/%Y").date().isoformat()
 
 
 def limpiar_fila(fila):
@@ -78,7 +94,7 @@ def limpiar_fila(fila):
         fecha = SIN_FECHA
     else:
         try:
-            fecha = date.fromisoformat(fecha).isoformat()
+            fecha = a_fecha(fecha)
         except ValueError:
             fecha = SIN_FECHA
             reparada = True
@@ -98,26 +114,15 @@ def cargar_gastos():
         guardar_todos([])
         return []
 
-    gastos = []
-    descartadas = []   # números de línea que no se han podido leer
-    reparadas = []     # números de línea con la fecha corregida
-
     try:
-        # "utf-8-sig" quita el BOM que añade Excel al principio del archivo
-        with open(ARCHIVO, "r", newline="", encoding="utf-8-sig") as f:
-            # Excel en español separa las columnas con ";" en vez de ","
-            separador = ";" if ";" in f.readline() else ","
-            f.seek(0)
-            reader = csv.DictReader(f, delimiter=separador)
-            cabecera_vieja = reader.fieldnames != CAMPOS
-            for fila in reader:
-                try:
-                    gasto, reparada = limpiar_fila(fila)
-                    gastos.append(gasto)
-                    if reparada:
-                        reparadas.append(reader.line_num)
-                except ValueError:
-                    descartadas.append(reader.line_num)
+        try:
+            # "utf-8-sig" quita el BOM del principio del archivo si lo tiene
+            gastos, descartadas, reparadas, separador = leer_csv("utf-8-sig")
+            codificacion = "utf-8"
+        except UnicodeDecodeError:
+            # Excel en español suele guardar en "ANSI" (cp1252), no en UTF-8
+            gastos, descartadas, reparadas, separador = leer_csv("cp1252")
+            codificacion = "cp1252"
     except (UnicodeDecodeError, csv.Error) as error:
         copia = hacer_copia_seguridad()
         print(f"\n⚠️  No se ha podido leer {NOMBRE_ARCHIVO} ({error}).")
@@ -132,15 +137,41 @@ def cargar_gastos():
             print(f"   Filas descartadas (cantidad no válida): líneas {', '.join(map(str, descartadas))}")
         if reparadas:
             print(f"   Fechas no válidas cambiadas a '{SIN_FECHA}': líneas {', '.join(map(str, reparadas))}")
-        guardar_todos(gastos)
-    elif cabecera_vieja or separador != ",":
-        # Cabecera antigua (sin fecha) o separado por ";": lo pasamos al formato normal
-        guardar_todos(gastos)
 
     if separador != ",":
         print(f"\nℹ️  {NOMBRE_ARCHIVO} estaba separado por ';' (Excel). Se ha convertido a comas.")
+    if codificacion != "utf-8":
+        print(f"\nℹ️  {NOMBRE_ARCHIVO} estaba guardado en ANSI (Excel). Se ha convertido a UTF-8.")
 
+    # Se vuelve a guardar siempre en el formato normal (comas, UTF-8, fechas
+    # AAAA-MM-DD, cantidades con punto), por si Excel lo había cambiado
+    guardar_todos(gastos)
     return gastos
+
+
+def leer_csv(codificacion):
+    """Lee el CSV con la codificación indicada.
+    Devuelve (gastos, líneas descartadas, líneas reparadas, separador).
+    Lanza UnicodeDecodeError si la codificación no es la del archivo."""
+    gastos = []
+    descartadas = []   # números de línea que no se han podido leer
+    reparadas = []     # números de línea con la fecha corregida
+
+    with open(ARCHIVO, "r", newline="", encoding=codificacion) as f:
+        # Excel en español separa las columnas con ";" en vez de ","
+        separador = ";" if ";" in f.readline() else ","
+        f.seek(0)
+        reader = csv.DictReader(f, delimiter=separador)
+        for fila in reader:
+            try:
+                gasto, reparada = limpiar_fila(fila)
+                gastos.append(gasto)
+                if reparada:
+                    reparadas.append(reader.line_num)
+            except ValueError:
+                descartadas.append(reader.line_num)
+
+    return gastos, descartadas, reparadas, separador
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +193,7 @@ def pedir_cantidad(mensaje, permitir_vacio=False):
         if not math.isfinite(cantidad):
             print("Eso no es un número válido, prueba otra vez.")
         elif cantidad <= 0:
-            print("La cantidad tiene que ser mayor que 0 (con 2 decimales como mucho).")
+            print("La cantidad tiene que ser mayor que 0.")
         elif cantidad >= CANTIDAD_GRANDE:
             confirmar = input(f"¿Seguro que son {cantidad:.2f} €? (s/n): ").strip().lower()
             if confirmar == "s":
@@ -172,15 +203,15 @@ def pedir_cantidad(mensaje, permitir_vacio=False):
 
 
 def pedir_fecha(mensaje):
-    """Pide una fecha AAAA-MM-DD. Enter devuelve None."""
+    """Pide una fecha AAAA-MM-DD o DD/MM/AAAA. Enter devuelve None."""
     while True:
         texto = input(mensaje).strip()
         if texto == "":
             return None
         try:
-            return date.fromisoformat(texto).isoformat()
+            return a_fecha(texto)
         except ValueError:
-            print("Fecha no válida. Usa el formato AAAA-MM-DD, por ejemplo 2026-11-18.")
+            print("Fecha no válida. Usa AAAA-MM-DD o DD/MM/AAAA, por ejemplo 2026-11-18 o 18/11/2026.")
 
 
 def elegir_de_lista(cantidad_opciones, mensaje):
@@ -274,7 +305,7 @@ def anadir_gasto(gastos):
     descripcion = input("¿En qué has gastado? ").strip() or DESCRIPCION_POR_DEFECTO
     cantidad = pedir_cantidad("¿Cuánto? ")
     categoria = input(f"¿Categoría? (comida, ocio, transporte...) [Enter = {CATEGORIA_POR_DEFECTO}] ").strip().lower() or CATEGORIA_POR_DEFECTO
-    fecha = pedir_fecha("¿Fecha? AAAA-MM-DD [Enter = hoy] ") or date.today().isoformat()
+    fecha = pedir_fecha("¿Fecha? (AAAA-MM-DD o DD/MM/AAAA) [Enter = hoy] ") or date.today().isoformat()
     gasto = {
         "descripcion": descripcion,
         "cantidad": cantidad,
@@ -415,6 +446,16 @@ def agrupar_pequenas(totales, umbral=UMBRAL_OTROS):
     return dict(sorted(agrupado.items(), key=lambda par: par[1], reverse=True))
 
 
+NOMBRES_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+                 "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+
+
+def nombre_mes(clave):
+    """Convierte "2026-08" en "Agosto 2026"."""
+    anio, mes = clave.split("-")
+    return f"{NOMBRES_MESES[int(mes) - 1]} {anio}"
+
+
 def totales_por_mes(gastos):
     """Devuelve ({"AAAA-MM": total} en orden cronológico, nº de gastos sin fecha)."""
     por_mes = agrupar_por_mes(gastos)
@@ -478,7 +519,8 @@ def grafico_meses(gastos):
         print("Ningún gasto tiene fecha, no se puede hacer el gráfico por mes.")
         return
 
-    meses = list(totales.keys())
+    # "2026-08" -> "Agosto\n2026" (el año debajo para que no se pisen las etiquetas)
+    meses = [nombre_mes(m).replace(" ", "\n") for m in totales]
     cantidades = list(totales.values())
 
     fig, ax = plt.subplots(figsize=(max(6, len(meses) * 1.2), 5))

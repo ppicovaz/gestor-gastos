@@ -54,11 +54,11 @@ Hechas con datos de ejemplo.
 
 ## Hoja de ruta
 
-- [x] V1: añadir gastos, ver la lista y el total por categoría, guardar en CSV
-- [x] V2: fechas, gastos por mes, editar y borrar, CSV a prueba de errores
-- [x] V3: gráficos de tarta por categorías y de barras por mes (con matplotlib)
-- [ ] Interfaz web con Streamlit
-- [ ] Categorización automática con IA
+- [x] **V1, en terminal:** añadir un gasto (fecha, cantidad, categoría y descripción), listarlos y ver el total por categoría. Se guarda en un CSV.
+- [x] **V2, filtros:** ver los gastos de un mes concreto, editar y borrar gastos, y controlar los errores (por ejemplo, que alguien escriba "hola" como cantidad).
+- [x] **V3, gráficas:** un gráfico de tarta por categorías y otro de barras por mes, con matplotlib.
+- [ ] **V4, base de datos e interfaz:** pasar del CSV a SQLite y añadir una interfaz web sencilla con Streamlit.
+- [ ] **V5, IA:** un modelo que adivina la categoría a partir de la descripción ("Mercadona" → Comida, "gasolina" → Transporte), con scikit-learn.
 
 ## Autor
 
